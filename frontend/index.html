@@ -375,6 +375,9 @@
   <div class="toasts" id="toasts"></div>
 
   <script>
+    let freighterApi = null;
+    import('https://cdn.jsdelivr.net/npm/@stellar/freighter-api@2.0.0/+esm').then(api => freighterApi = api);
+
     // ── CONFIG ────────────────────────────────────────────────────────────────
     const CONTRACT_ID  = 'CDND234UYOEJJVXWBALEZDS7PIUU6XPF5KJFS5TD4D5RNETVHUUZ2POS';
     const RPC_URL      = 'https://soroban-testnet.stellar.org';
@@ -456,10 +459,10 @@
 
         const prepared = assemble(tx, sim).build();
 
-        if (!window.freighter) throw new Error('Freighter extension not found. Please install it from freighter.app');
+        if (!(await freighterApi.isConnected())) throw new Error('Freighter extension not found or not connected.');
 
-        // Sign — handle both old API (returns string) and new API (returns {signedTxXdr})
-        const raw = await window.freighter.signTransaction(
+        // Sign using the modern API
+        const raw = await freighterApi.signTransaction(
           prepared.toXDR('base64'),
           { networkPassphrase: NP }
         );
@@ -499,18 +502,19 @@
     }
 
     async function connect(){
-      if (!window.freighter) {
+      if (!freighterApi) { toast('Wallet API loading, please wait...', true); return; }
+      
+      const isConnected = await freighterApi.isConnected();
+      if (!isConnected) {
         toast('Install the Freighter browser extension first (freighter.app)', true);
         return;
       }
       try {
-        // requestAccess returns public key in some versions, void in others
-        let pk;
-        try {
-          const res = await window.freighter.requestAccess();
-          pk = (typeof res === 'string' && res.length > 10) ? res : null;
-        } catch(_){}
-        if (!pk) pk = await window.freighter.getPublicKey();
+        let isAllowed = await freighterApi.isAllowed();
+        if (!isAllowed) { await freighterApi.setAllowed(); }
+        let pk = await freighterApi.getPublicKey();
+        
+        if (!pk) throw new Error('Could not get public key. Please unlock your wallet.');
 
         S.wallet = pk;
         S.init   = true;
