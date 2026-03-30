@@ -379,22 +379,22 @@
     function getFreighter() { return window.freighterApi || window.freighter; }
 
     // ── CONFIG ────────────────────────────────────────────────────────────────
-    const CONTRACT_ID  = 'CDND234UYOEJJVXWBALEZDS7PIUU6XPF5KJFS5TD4D5RNETVHUUZ2POS';
-    const RPC_URL      = 'https://soroban-testnet.stellar.org';
-    const NP           = StellarSdk.Networks.TESTNET;
+    const CONTRACT_ID = 'CDND234UYOEJJVXWBALEZDS7PIUU6XPF5KJFS5TD4D5RNETVHUUZ2POS';
+    const RPC_URL     = 'https://soroban-testnet.stellar.org';
+    const HORIZON_URL = 'https://horizon-testnet.stellar.org';
+    const NP          = StellarSdk.Networks.TESTNET;
 
     // ── SOROBAN SETUP ─────────────────────────────────────────────────────────
-    // Support stellar-sdk v11 (SorobanRpc) and v12+ (rpc)
-    const RpcNS   = StellarSdk.SorobanRpc ?? StellarSdk.rpc;
-    const rpc     = new RpcNS.Server(RPC_URL);
-    const assemble = RpcNS.assembleTransaction;
+    const RpcNS        = StellarSdk.SorobanRpc ?? StellarSdk.rpc;
+    const rpc          = new RpcNS.Server(RPC_URL);
+    const assemble     = RpcNS.assembleTransaction;
     const sorobanContract = new StellarSdk.Contract(CONTRACT_ID);
 
-    // ── STATE ─────────────────────────────────────────────────────────────────
+    // ── CONSTANTS ─────────────────────────────────────────────────────────────
     const SERVICES = ['Consultation','Laboratory','Pharmacy','Imaging','Emergency'];
     const SVC_CLS  = {
       Consultation:'svc-consult', Laboratory:'svc-lab',
-      Pharmacy:'svc-pharmacy',   Imaging:'svc-imaging', Emergency:'svc-emergency'
+      Pharmacy:'svc-pharmacy', Imaging:'svc-imaging', Emergency:'svc-emergency'
     };
     const DESCS = {
       Consultation:['OPD General Checkup','Pediatric Consult','Follow-up Visit','ENT Evaluation'],
@@ -404,18 +404,38 @@
       Emergency:   ['ER Triage Assessment','Wound Suturing','IV Fluid Admin','Nebulization'],
     };
 
+    // ── STATE ─────────────────────────────────────────────────────────────────
     let S = {
       init: false, wallet: null,
       records: [], log: [],
       showNew: false,
-      totalBills: 0, totalPaid: 0,   // totalPaid in XLM float
-      loading: false,
+      totalBills: 0, totalPaid: 0,
+      xlmBalance: null,
+      loading: false, recordsLoading: false,
     };
 
     // ── UTILS ─────────────────────────────────────────────────────────────────
-    const tr  = a => a ? a.slice(0,6)+'…'+a.slice(-4) : '—';
-    const ts  = () => new Date().toLocaleTimeString('en-PH',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+    const tr   = a => a ? a.slice(0,6)+'…'+a.slice(-4) : '—';
+    const ts   = () => new Date().toLocaleTimeString('en-PH',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
     const pick = arr => arr[~~(Math.random()*arr.length)];
+
+    function addrStr(v) {
+      if (!v) return '';
+      if (typeof v === 'string') return v;
+      return v.toString();
+    }
+
+    function bufToHex(b) {
+      if (!b) return '';
+      const u8 = (b instanceof Uint8Array) ? b : new Uint8Array(b.buffer ?? b);
+      return Array.from(u8).map(x => x.toString(16).padStart(2,'0')).join('');
+    }
+
+    function toUint8(b) {
+      if (b instanceof Uint8Array) return b;
+      if (b && b.buffer) return new Uint8Array(b.buffer, b.byteOffset, b.byteLength);
+      return new Uint8Array(b);
+    }
 
     function addLog(l,t,m){ S.log.unshift({l,t,m,ts:ts()}); if(S.log.length>80) S.log.pop(); }
 
@@ -428,13 +448,10 @@
     }
 
     function newRid(){ const b=new Uint8Array(32); crypto.getRandomValues(b); return b; }
-    function toHex(b){ return Array.from(b).map(x=>x.toString(16).padStart(2,'0')).join(''); }
 
-    // Soroban #[contracttype] unit enum variant → ScVal::Vec([Symbol])
+    // soroban-sdk v21 (Protocol 22): unit enum variants → ScvSymbol directly
     function enumScVal(variant){
-      return StellarSdk.xdr.ScVal.scvVec(
-        [StellarSdk.xdr.ScVal.scvSymbol(variant)]
-      );
+      return StellarSdk.xdr.ScVal.scvSymbol(variant);
     }
 
     // ── SOROBAN HELPERS ───────────────────────────────────────────────────────
@@ -462,26 +479,19 @@
         const fApi = getFreighter();
         if (!fApi) throw new Error('Freighter extension not found.');
         if (fApi.isConnected) {
-            const connResult = await fApi.isConnected();
-            const connected = typeof connResult === 'object' ? connResult.isConnected : connResult;
-            if (!connected) throw new Error('Freighter not connected.');
+          const c = await fApi.isConnected();
+          if (!(typeof c === 'object' ? c.isConnected : c)) throw new Error('Freighter not connected.');
         }
 
-        // Sign using the appropriate API
-        const raw = await fApi.signTransaction(
-          prepared.toXDR('base64'),
-          { networkPassphrase: NP }
-        );
+        const raw = await fApi.signTransaction(prepared.toXDR('base64'), { networkPassphrase: NP });
         if (raw && raw.error) throw new Error('Signing failed: ' + (raw.error.message || JSON.stringify(raw.error)));
         const signedXdr = typeof raw === 'string' ? raw : raw.signedTxXdr;
-        if (!signedXdr) throw new Error('No signed XDR returned — did you reject the transaction in Freighter?');
+        if (!signedXdr) throw new Error('No signed XDR — did you reject in Freighter?');
 
         const signedTx = StellarSdk.TransactionBuilder.fromXDR(signedXdr, NP);
         const sent     = await rpc.sendTransaction(signedTx);
-
         if (sent.status === 'ERROR') throw new Error('Send failed: ' + JSON.stringify(sent.errorResult));
 
-        // Poll until confirmed
         for (let i = 0; i < 30; i++) {
           await new Promise(r => setTimeout(r, 2000));
           const res = await rpc.getTransaction(sent.hash);
@@ -494,7 +504,7 @@
       }
     }
 
-    // ── CONTRACT FUNCTIONS ────────────────────────────────────────────────────
+    // ── DATA LOADERS ──────────────────────────────────────────────────────────
     async function loadStats(){
       if (!S.wallet) return;
       try {
@@ -502,90 +512,155 @@
         if (sim.result?.retval) {
           const n      = StellarSdk.scValToNative(sim.result.retval);
           S.totalBills = Number(n[0]);
-          S.totalPaid  = Number(BigInt(n[1])) / 10_000_000; // stroops → XLM
+          S.totalPaid  = Number(BigInt(n[1])) / 10_000_000;
         }
+      } catch(e) { console.error('loadStats:', e); }
+    }
+
+    async function loadXlmBalance(){
+      if (!S.wallet) return;
+      try {
+        const resp = await fetch(`${HORIZON_URL}/accounts/${S.wallet}`);
+        if (!resp.ok) return;
+        const data = await resp.json();
+        const xlm  = (data.balances || []).find(b => b.asset_type === 'native');
+        S.xlmBalance = xlm ? parseFloat(xlm.balance) : 0;
+      } catch(e) { console.error('loadXlmBalance:', e); }
+    }
+
+    async function loadRecords(){
+      if (!S.wallet) return;
+      try {
+        // Get all record IDs where connected wallet is the patient
+        const sim1 = await simulateOp(
+          sorobanContract.call('get_patient_records', new StellarSdk.Address(S.wallet).toScVal())
+        );
+        if (!sim1.result?.retval) { S.records = []; return; }
+
+        const ids = StellarSdk.scValToNative(sim1.result.retval);
+        if (!Array.isArray(ids) || !ids.length) { S.records = []; return; }
+
+        // Fetch each record in parallel
+        const results = await Promise.all(ids.map(async idRaw => {
+          try {
+            const idBytes = toUint8(idRaw);
+            const sim2 = await simulateOp(
+              sorobanContract.call('verify_receipt', StellarSdk.xdr.ScVal.scvBytes(idBytes))
+            );
+            if (!sim2.result?.retval) return null;
+
+            const rec     = StellarSdk.scValToNative(sim2.result.retval);
+            const patient = addrStr(rec.patient);
+            const svc     = String(rec.service || '');
+            const amtXlm  = Number(rec.amount  || 0) / 10_000_000;
+            const tsNum   = Number(rec.timestamp || 0);
+
+            return {
+              id:       bufToHex(idBytes),
+              idBytes,
+              patient,
+              pname:    patient === S.wallet ? 'You ('+tr(patient)+')' : tr(patient),
+              hospital: addrStr(rec.hospital),
+              service:  svc,
+              amount:   amtXlm,
+              amtStroops: rec.amount,
+              desc:     String(rec.description || ''),
+              paid:     !!rec.paid,
+              time:     tsNum
+                ? new Date(tsNum * 1000).toLocaleTimeString('en-PH',{hour:'2-digit',minute:'2-digit',second:'2-digit'})
+                : ts(),
+              tsNum,
+            };
+          } catch(e) {
+            console.error('verify_receipt failed:', e);
+            return null;
+          }
+        }));
+
+        // Sort newest first by on-chain timestamp
+        S.records = results.filter(Boolean).sort((a,b) => b.tsNum - a.tsNum);
       } catch(e) {
-        console.error('loadStats:', e);
+        console.error('loadRecords:', e);
       }
     }
 
+    async function refreshAll(){
+      S.recordsLoading = true; render();
+      await Promise.all([loadStats(), loadXlmBalance(), loadRecords()]);
+      S.recordsLoading = false;
+      toast('Records refreshed from chain');
+      render();
+    }
+
+    // ── ACTIONS ───────────────────────────────────────────────────────────────
     async function connect(){
       const fApi = getFreighter();
-      if (!fApi) {
-        toast('Install the Freighter browser extension first (freighter.app)', true);
-        return;
-      }
+      if (!fApi) { toast('Install the Freighter browser extension first.', true); return; }
       try {
         if (fApi.isConnected) {
-            const connResult = await fApi.isConnected();
-            const connected = typeof connResult === 'object' ? connResult.isConnected : connResult;
-            if (!connected) {
-                toast('Freighter extension is locked or not connected.', true);
-                return;
-            }
+          const c = await fApi.isConnected();
+          if (!(typeof c === 'object' ? c.isConnected : c)) {
+            toast('Freighter is locked or not connected.', true); return;
+          }
         }
-
         if (typeof fApi.isAllowed === 'function') {
-            const allowResult = await fApi.isAllowed();
-            const allowed = typeof allowResult === 'object' ? allowResult.isAllowed : allowResult;
-            if (!allowed && typeof fApi.setAllowed === 'function') { await fApi.setAllowed(); }
+          const a = await fApi.isAllowed();
+          const allowed = typeof a === 'object' ? a.isAllowed : a;
+          if (!allowed && typeof fApi.setAllowed === 'function') await fApi.setAllowed();
         }
 
         let pk;
         if (typeof fApi.getAddress === 'function') {
-            const res = await fApi.getAddress();
-            pk = typeof res === 'object' ? res.address : res;
+          const r = await fApi.getAddress();
+          pk = typeof r === 'object' ? r.address : r;
         } else if (typeof fApi.requestAccess === 'function') {
-            const res = await fApi.requestAccess();
-            pk = typeof res === 'object' ? res.address || res.publicKey : res;
+          const r = await fApi.requestAccess();
+          pk = typeof r === 'object' ? (r.address || r.publicKey) : r;
         }
-
-        if (!pk) throw new Error('Could not get public key. Please unlock your wallet.');
+        if (!pk) throw new Error('Could not get wallet address.');
 
         S.wallet = pk;
         S.init   = true;
+        S.recordsLoading = true;
         addLog('LINK','sys','Wallet connected: '+tr(pk));
-        toast('Connected to Freighter');
-        await loadStats();
+        toast('Connected — loading records…');
+        render();
+
+        await Promise.all([loadStats(), loadXlmBalance(), loadRecords()]);
+        S.recordsLoading = false;
         render();
       } catch(e) {
-        toast('Connection failed: ' + e.message, true);
+        toast('Connection failed: '+e.message, true);
       }
     }
 
     async function createBill(){
       const svc = document.getElementById('f-svc').value;
       const xlm = parseFloat(document.getElementById('f-amt').value) || 0;
-      if (xlm <= 0){ toast('Enter a valid amount', true); return; }
+      if (xlm <= 0){ toast('Enter a valid amount.', true); return; }
 
       const amtStroops = BigInt(Math.round(xlm * 10_000_000));
       const idBytes    = newRid();
-      const idHex      = toHex(idBytes);
       const desc       = pick(DESCS[svc]);
       const walletAddr = new StellarSdk.Address(S.wallet);
 
       const op = sorobanContract.call('create_billing',
-        walletAddr.toScVal(),                                         // hospital = connected wallet
-        walletAddr.toScVal(),                                         // patient  = connected wallet (self-demo)
-        StellarSdk.nativeToScVal(idBytes, { type: 'bytes' }),        // record_id BytesN<32>
-        enumScVal(svc),                                               // ServiceType enum
-        StellarSdk.nativeToScVal(amtStroops, { type: 'i128' }),      // amount in stroops
-        StellarSdk.nativeToScVal(desc,       { type: 'string' }),    // description
+        walletAddr.toScVal(),
+        walletAddr.toScVal(),
+        StellarSdk.xdr.ScVal.scvBytes(idBytes),
+        enumScVal(svc),
+        StellarSdk.nativeToScVal(amtStroops, { type: 'i128' }),
+        StellarSdk.nativeToScVal(desc, { type: 'string' }),
       );
 
       try {
         await invokeOp(op);
-        S.records.unshift({
-          id: idHex, idBytes,
-          patient: S.wallet, pname: 'You ('+tr(S.wallet)+')',
-          hospital: S.wallet,
-          service: svc, amount: xlm, amtStroops,
-          desc, paid: false, time: ts(),
-        });
         addLog('BILL','bill', svc+' — '+xlm.toLocaleString()+' XLM');
         toast('Billing created on-chain ✓');
         S.showNew = false;
-        await loadStats();
+        S.recordsLoading = true; render();
+        await Promise.all([loadStats(), loadXlmBalance(), loadRecords()]);
+        S.recordsLoading = false;
         render();
       } catch(e) {
         toast(e.message, true);
@@ -595,19 +670,20 @@
 
     async function payBill(idx){
       const r = S.records[idx];
-      if (r.paid || S.loading) return;
+      if (!r || r.paid || S.loading) return;
 
       const op = sorobanContract.call('pay_bill',
-        new StellarSdk.Address(S.wallet).toScVal(),       // patient
-        StellarSdk.xdr.ScVal.scvBytes(r.idBytes),              // record_id
+        new StellarSdk.Address(S.wallet).toScVal(),
+        StellarSdk.xdr.ScVal.scvBytes(r.idBytes),
       );
 
       try {
         await invokeOp(op);
-        r.paid = true;
         addLog('PAY','pay', r.service+' — '+r.amount.toLocaleString()+' XLM paid');
         toast('Payment confirmed on-chain ✓');
-        await loadStats();
+        S.recordsLoading = true; render();
+        await Promise.all([loadStats(), loadXlmBalance(), loadRecords()]);
+        S.recordsLoading = false;
         render();
       } catch(e) {
         toast(e.message, true);
@@ -617,7 +693,7 @@
 
     function showNewBill(){ S.showNew = true;  render(); }
     function closeModal() { S.showNew = false; render(); }
-    function clearView()  { S.records = []; S.log = []; toast('Local view cleared'); render(); }
+    function clearView()  { S.log = []; toast('Log cleared'); render(); }
 
     // ── RENDER ────────────────────────────────────────────────────────────────
     const HEART_SVG = `<svg viewBox="0 0 24 24" fill="none" stroke="#2dd4bf" stroke-width="2" stroke-linecap="round"><path d="M3 12h4l3-9 4 18 3-9h4"/></svg>`;
@@ -625,10 +701,10 @@
     function render(){
       const app = document.getElementById('app');
       let html = renderNav();
-      if (!S.init)      html += renderLanding();
-      else              html += renderDash();
-      if (S.showNew)    html += renderNewModal();
-      if (S.loading)    html += `<div class="submitting-overlay"><div class="submitting-box"><div class="spin"></div>Submitting to Soroban…</div></div>`;
+      if (!S.init) html += renderLanding();
+      else         html += renderDash();
+      if (S.showNew)  html += renderNewModal();
+      if (S.loading)  html += `<div class="submitting-overlay"><div class="submitting-box"><div class="spin"></div>Submitting to Soroban…</div></div>`;
       app.innerHTML = html;
     }
 
@@ -639,7 +715,10 @@
           <span class="nav-brand">LusogChain</span>
           <span class="nav-chip">Soroban · Testnet</span>
         </div>
-        ${S.wallet ? `<div class="wallet-pill on">${tr(S.wallet)}</div>` : ''}
+        ${S.wallet ? `<div style="display:flex;align-items:center;gap:12px">
+          ${S.xlmBalance !== null ? `<span style="font-family:var(--mono);font-size:11px;color:var(--teal);font-weight:600">${S.xlmBalance.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})} XLM</span>` : ''}
+          <div class="wallet-pill on">${tr(S.wallet)}</div>
+        </div>` : ''}
       </div>`;
     }
 
@@ -670,9 +749,9 @@
 
     function renderDash(){
       const unpaid    = S.records.filter(r => !r.paid);
-      const paidCount = S.records.filter(r =>  r.paid).length;
+      const paidRecs  = S.records.filter(r =>  r.paid);
       const unpaidAmt = unpaid.reduce((s,r) => s + r.amount, 0);
-      const dis       = S.loading ? 'disabled' : '';
+      const dis       = (S.loading || S.recordsLoading) ? 'disabled' : '';
 
       return `
         <div class="stat-row fu d1">
@@ -686,7 +765,7 @@
           </div>
           <div class="stat-card">
             <div class="sc-label">Paid / Unpaid</div>
-            <div class="sc-val">${paidCount} / ${unpaid.length}</div>
+            <div class="sc-val">${paidRecs.length} / ${unpaid.length}</div>
           </div>
           <div class="stat-card">
             <div class="sc-label">Outstanding</div>
@@ -695,44 +774,50 @@
         </div>
 
         <div class="actions fu d2">
-          <button class="btn btn-dark" onclick="showNewBill()" ${dis}>New Billing</button>
-          <button class="btn btn-out"  onclick="loadStats().then(render)" ${dis}>Refresh Stats</button>
-          <button class="btn btn-ghost" onclick="clearView()" ${dis}>Clear View</button>
+          <button class="btn btn-dark"  onclick="showNewBill()" ${dis}>New Billing</button>
+          <button class="btn btn-out"   onclick="refreshAll()"  ${dis}>${S.recordsLoading ? 'Loading…' : 'Refresh'}</button>
+          <button class="btn btn-ghost" onclick="clearView()"   ${dis}>Clear Log</button>
         </div>
 
         <div class="sh fu d3">
           <div class="sh-t">Billing Records</div>
           <div class="sh-line"></div>
-          <div class="sh-meta">${S.records.length} local records</div>
+          <div class="sh-meta">${S.recordsLoading ? 'Loading from chain…' : S.records.length+' on-chain records'}</div>
         </div>
 
-        ${S.records.length === 0
+        ${S.recordsLoading
+          ? `<div style="background:var(--white);border:1.5px solid var(--line);border-radius:var(--r);padding:40px;text-align:center;color:var(--slate);margin-bottom:32px" class="fu d4">
+               <div class="spin" style="margin:0 auto 12px;width:20px;height:20px"></div>
+               Loading records from blockchain…
+             </div>`
+          : S.records.length === 0
           ? `<div style="background:var(--white);border:1.5px solid var(--line);border-radius:var(--r);padding:32px;text-align:center;color:var(--slate);font-style:italic;margin-bottom:32px" class="fu d4">
-              No billing records yet. Click <strong>New Billing</strong> to create one on-chain.
+               No billing records yet. Click <strong>New Billing</strong> to create one on-chain.
              </div>`
           : `<div style="overflow-x:auto" class="fu d4">
-              <table class="bill-table">
-                <thead><tr>
-                  <th>ID</th><th>Patient</th><th>Service</th><th>Description</th><th>Amount</th><th>Status</th><th></th>
-                </tr></thead>
-                <tbody>
-                ${S.records.map((r,i) => `<tr>
-                  <td class="id-cell">${r.id.slice(0,8)}</td>
-                  <td>
-                    <div style="font-weight:600;font-size:13px">${r.pname}</div>
-                    <div class="addr-cell">${tr(r.patient)}</div>
-                  </td>
-                  <td><span class="svc-tag ${SVC_CLS[r.service]||''}">${r.service}</span></td>
-                  <td class="desc-cell">${r.desc}</td>
-                  <td class="amt-cell">${r.amount.toLocaleString()} XLM</td>
-                  <td><span class="pay-badge ${r.paid?'pay-yes':'pay-no'}">${r.paid?'Paid':'Unpaid'}</span></td>
-                  <td>${r.paid
-                    ? ''
-                    : `<button class="pay-btn" onclick="payBill(${i})" ${dis}>Pay</button>`
-                  }</td>
-                </tr>`).join('')}
-                </tbody>
-              </table>
+               <table class="bill-table">
+                 <thead><tr>
+                   <th>ID</th><th>Patient</th><th>Service</th><th>Description</th><th>Amount</th><th>Time</th><th>Status</th><th></th>
+                 </tr></thead>
+                 <tbody>
+                 ${S.records.map((r,i) => `<tr>
+                   <td class="id-cell">${r.id.slice(0,8)}</td>
+                   <td>
+                     <div style="font-weight:600;font-size:13px">${r.pname}</div>
+                     <div class="addr-cell">${tr(r.patient)}</div>
+                   </td>
+                   <td><span class="svc-tag ${SVC_CLS[r.service]||''}">${r.service}</span></td>
+                   <td class="desc-cell">${r.desc}</td>
+                   <td class="amt-cell">${r.amount.toLocaleString()} XLM</td>
+                   <td class="addr-cell">${r.time}</td>
+                   <td><span class="pay-badge ${r.paid?'pay-yes':'pay-no'}">${r.paid?'Paid':'Unpaid'}</span></td>
+                   <td>${r.paid
+                     ? ''
+                     : `<button class="pay-btn" onclick="payBill(${i})" ${dis}>Pay</button>`
+                   }</td>
+                 </tr>`).join('')}
+                 </tbody>
+               </table>
              </div>`
         }
 
