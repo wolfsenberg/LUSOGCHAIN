@@ -915,22 +915,28 @@
         }
         if (!pk) throw new Error('Could not get wallet address from Freighter.');
 
-        S.wallet = pk;
-        S.init   = true;
-        S.recordsLoading = true;
-        addLog('LINK','sys','Wallet connected: '+tr(pk));
-        toast('Connected — loading records…');
-        render();
-
-        await Promise.all([loadStats(), loadXlmBalance(), loadRecords()]);
-        S.recordsLoading = false;
-        render();
+        await initSession(pk, true);
       } catch(e) {
         toast('Connection failed: ' + e.message, true);
       }
     }
 
+    // Shared init used both by connect() and page-reload restore
+    async function initSession(pk, showToast) {
+      S.wallet = pk;
+      S.init   = true;
+      S.recordsLoading = true;
+      localStorage.setItem('lc_wallet', pk);
+      addLog('LINK','sys','Wallet: '+tr(pk));
+      if (showToast) toast('Connected — loading records…');
+      render();
+      await Promise.all([loadStats(), loadXlmBalance(), loadRecords()]);
+      S.recordsLoading = false;
+      render();
+    }
+
     function disconnect(){
+      localStorage.removeItem('lc_wallet');
       S.wallet = null; S.init = false; S.records = []; S.log = [];
       S.totalBills = 0; S.totalPaid = 0; S.xlmBalance = null;
       S.showNew = false; S.showReceipt = null;
@@ -938,17 +944,30 @@
       render();
     }
 
+    // Silently restore session from localStorage on page load (no Freighter needed for reads)
+    async function tryRestoreSession() {
+      const saved = localStorage.getItem('lc_wallet');
+      if (!saved) return;
+      await initSession(saved, false);
+    }
+
     async function createBill(){
+      // 1. Read form values while modal is still in the DOM
       const svc = document.getElementById('f-svc').value;
       const xlm = parseFloat(document.getElementById('f-amt').value) || 0;
       if (xlm <= 0)     { toast('Enter a valid amount.', true); return; }
       if (xlm > 100000) { toast('Amount too large (max 100,000 XLM).', true); return; }
 
-      const customDesc  = (document.getElementById('f-desc').value || '').trim();
-      const desc        = customDesc || pick(DESCS[svc]);
-      const amtStroops  = BigInt(Math.round(xlm * 10_000_000));
-      const idBytes     = newRid();
-      const walletAddr  = new StellarSdk.Address(S.wallet);
+      const customDesc = (document.getElementById('f-desc').value || '').trim();
+      const desc       = customDesc || pick(DESCS[svc]);
+
+      // 2. Close modal immediately so only the Freighter overlay shows
+      S.showNew = false;
+      render();
+
+      const amtStroops = BigInt(Math.round(xlm * 10_000_000));
+      const idBytes    = newRid();
+      const walletAddr = new StellarSdk.Address(S.wallet);
 
       const op = sorobanContract.call('create_billing',
         walletAddr.toScVal(),
@@ -962,10 +981,8 @@
       try {
         await invokeOp(op);
         addLog('BILL','bill', svc+' — '+xlm.toLocaleString()+' XLM — '+desc);
-        toast('Billing created on-chain ✓');
-        // Fade the modal out, then silently refresh in the background
-        await animateModalOut();
-        S.showNew = false;
+        toast('Billing record created on-chain ✓');
+        // Silently refresh without hiding the table
         S.refreshing = true;
         render();
         await Promise.all([loadStats(), loadXlmBalance(), loadRecords()]);
@@ -998,8 +1015,9 @@
         r.paid = true;
         S.totalPaid += r.amount;
         addLog('PAY','pay', r.service+' — '+r.amount.toLocaleString()+' XLM paid');
-        toast('Payment confirmed on-chain ✓');
-        // Optimistic render first, then silently sync in background
+        toast('Payment confirmed on-chain ✓ (demo: hospital = you, XLM stays in wallet minus ~0.001 fee)');
+        // Close receipt modal if open, then silently refresh
+        S.showReceipt = null;
         S.refreshing = true;
         render();
         await Promise.all([loadStats(), loadXlmBalance(), loadRecords()]);
@@ -1014,23 +1032,6 @@
     function showNewBill(){ S.showNew = true;  render(); }
     function closeModal() { S.showNew = false; render(); }
 
-    // Fade the modal/overlay out before removing it from the DOM
-    function animateModalOut() {
-      return new Promise(resolve => {
-        const overlay = document.querySelector('.overlay');
-        if (!overlay) { resolve(); return; }
-        const modal   = overlay.querySelector('.modal, .receipt-modal');
-        const mobile  = window.innerWidth <= 767;
-        overlay.style.transition = 'opacity 0.3s ease';
-        overlay.style.opacity    = '0';
-        if (modal) {
-          modal.style.transition = 'transform 0.28s ease, opacity 0.28s ease';
-          modal.style.transform  = mobile ? 'translateY(100%)' : 'translateY(16px) scale(0.97)';
-          modal.style.opacity    = '0';
-        }
-        setTimeout(resolve, 300);
-      });
-    }
 
     function openReceipt(idx, e){
       if (e) e.stopPropagation();
@@ -1136,6 +1137,12 @@
               ? `<div style="font-family:var(--mono);font-size:10px;color:var(--red);margin-top:4px">${unpaid.length} unpaid bill${unpaid.length!==1?'s':''}</div>`
               : ''}
           </div>
+        </div>
+
+        <!-- Demo notice: hospital = patient = same wallet -->
+        <div style="background:var(--amber-dim);border:1.5px solid var(--amber-soft);border-radius:var(--rs);padding:10px 16px;font-family:var(--mono);font-size:11px;color:#92400e;margin-bottom:16px;display:flex;gap:8px;align-items:flex-start" class="fu d2">
+          <span style="flex-shrink:0">⚠</span>
+          <span><strong>Demo mode:</strong> Your wallet acts as both hospital and patient, so "Pay" transfers XLM to yourself — only the transaction fee (~0.001 XLM) is deducted from your balance. Real deployment would use separate hospital wallets.</span>
         </div>
 
         <div class="toolbar fu d2">
@@ -1354,7 +1361,9 @@
       </div>`;
     }
 
+    // Initial render, then try to restore saved session
     render();
+    tryRestoreSession();
   </script>
 </body>
 </html>
