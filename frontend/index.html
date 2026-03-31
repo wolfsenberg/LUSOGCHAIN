@@ -688,7 +688,7 @@
       showReceipt: null,
       totalBills: 0, totalPaid: 0,
       xlmBalance: null,
-      loading: false, recordsLoading: false, refreshing: false,
+      loading: false, recordsLoading: false,
       activeTab: 'unpaid',
       filterSvc: '',
     };
@@ -880,12 +880,8 @@
       }
     }
 
-    async function refreshAll(){
-      S.recordsLoading = true; render();
-      await Promise.all([loadStats(), loadXlmBalance(), loadRecords()]);
-      S.recordsLoading = false;
-      toast('Records refreshed from chain');
-      render();
+    function refreshAll(){
+      window.location.reload();
     }
 
     // ── ACTIONS ───────────────────────────────────────────────────────────────
@@ -952,7 +948,7 @@
     }
 
     async function createBill(){
-      // 1. Read form values while modal is still in the DOM
+      // Read form values while modal is still in the DOM
       const svc = document.getElementById('f-svc').value;
       const xlm = parseFloat(document.getElementById('f-amt').value) || 0;
       if (xlm <= 0)     { toast('Enter a valid amount.', true); return; }
@@ -961,7 +957,7 @@
       const customDesc = (document.getElementById('f-desc').value || '').trim();
       const desc       = customDesc || pick(DESCS[svc]);
 
-      // 2. Close modal immediately so only the Freighter overlay shows
+      // Close modal before invoking so Freighter popup has a clean screen
       S.showNew = false;
       render();
 
@@ -980,17 +976,11 @@
 
       try {
         await invokeOp(op);
-        addLog('BILL','bill', svc+' — '+xlm.toLocaleString()+' XLM — '+desc);
-        toast('Billing record created on-chain ✓');
-        // Silently refresh without hiding the table
-        S.refreshing = true;
-        render();
-        await Promise.all([loadStats(), loadXlmBalance(), loadRecords()]);
-        S.refreshing = false;
-        render();
+        toast('Billing record created on-chain ✓ — reloading…');
+        setTimeout(() => window.location.reload(), 1800);
       } catch(e) {
         toast(e.message, true);
-        render();
+        setTimeout(() => window.location.reload(), 4000);
       }
     }
 
@@ -1012,20 +1002,11 @@
 
       try {
         await invokeOp(op);
-        r.paid = true;
-        S.totalPaid += r.amount;
-        addLog('PAY','pay', r.service+' — '+r.amount.toLocaleString()+' XLM paid');
-        toast('Payment confirmed on-chain ✓ (demo: hospital = you, XLM stays in wallet minus ~0.001 fee)');
-        // Close receipt modal if open, then silently refresh
-        S.showReceipt = null;
-        S.refreshing = true;
-        render();
-        await Promise.all([loadStats(), loadXlmBalance(), loadRecords()]);
-        S.refreshing = false;
-        render();
+        toast('Payment confirmed on-chain ✓ — reloading…');
+        setTimeout(() => window.location.reload(), 1800);
       } catch(e) {
         toast(e.message, true);
-        render();
+        setTimeout(() => window.location.reload(), 4000);
       }
     }
 
@@ -1117,6 +1098,12 @@
       const outstandingClass = unpaidAmt > 0 ? 'accent-red' : 'accent-teal';
 
       return `
+        <!-- Demo notice -->
+        <div style="background:var(--amber-dim);border:1.5px solid var(--amber-soft);border-radius:var(--rs);padding:10px 16px;font-family:var(--mono);font-size:11px;color:#92400e;margin-bottom:16px;display:flex;gap:8px;align-items:flex-start" class="fu d1">
+          <span style="flex-shrink:0">⚠</span>
+          <span><strong>Demo mode:</strong> Your wallet acts as both hospital and patient, so "Pay" transfers XLM to yourself — only the ~0.001 XLM transaction fee is deducted. Real deployment would use separate hospital wallets.</span>
+        </div>
+
         <div class="stat-row fu d1">
           <div class="stat-card">
             <div class="sc-label">Total Records</div>
@@ -1139,16 +1126,10 @@
           </div>
         </div>
 
-        <!-- Demo notice: hospital = patient = same wallet -->
-        <div style="background:var(--amber-dim);border:1.5px solid var(--amber-soft);border-radius:var(--rs);padding:10px 16px;font-family:var(--mono);font-size:11px;color:#92400e;margin-bottom:16px;display:flex;gap:8px;align-items:flex-start" class="fu d2">
-          <span style="flex-shrink:0">⚠</span>
-          <span><strong>Demo mode:</strong> Your wallet acts as both hospital and patient, so "Pay" transfers XLM to yourself — only the transaction fee (~0.001 XLM) is deducted from your balance. Real deployment would use separate hospital wallets.</span>
-        </div>
-
         <div class="toolbar fu d2">
           <div class="toolbar-left">
             <button class="btn btn-dark" onclick="showNewBill()" ${dis}>+ New Billing</button>
-            <button class="btn btn-out"  onclick="refreshAll()"  ${dis}>${loading ? 'Loading…' : S.refreshing ? 'Syncing…' : 'Refresh'}</button>
+            <button class="btn btn-out"  onclick="refreshAll()"  ${dis}>${loading ? 'Loading…' : 'Refresh'}</button>
           </div>
           <div class="toolbar-right">
             <select class="filter-select" onchange="setFilter(event)" ${dis}>
@@ -1174,7 +1155,6 @@
                  <button class="tab-btn ${S.activeTab==='all'?'active':''}" onclick="setTab('all')">
                    All <span class="tab-count">${S.records.length}</span>
                  </button>
-                 ${S.refreshing ? `<span style="margin-left:auto;display:flex;align-items:center;gap:6px;padding:0 16px;font-family:var(--mono);font-size:10px;color:var(--teal)"><span class="spin" style="width:11px;height:11px;border-width:1.5px"></span>Syncing…</span>` : ''}
                </div>
                ${viewRecords.length === 0
                  ? `<div class="table-empty-state">
@@ -1259,8 +1239,11 @@
     function spin16(){ return '<span class="spin" style="width:16px;height:16px;display:inline-block;vertical-align:middle"></span>'; }
 
     function renderNewModal(){
-      return `<div class="overlay" onclick="if(event.target===this)closeModal()">
+      // No onclick-outside-to-close — mobile select pickers bubble tap events
+      // to the overlay and would accidentally close the modal.
+      return `<div class="overlay">
         <div class="modal">
+          <button class="close-x" onclick="closeModal()" style="background:var(--cloud);color:var(--slate);top:16px;right:16px;">✕</button>
           <h2>New Billing Record</h2>
           <p>Creates a real on-chain billing entry via Soroban. Freighter will ask you to sign.</p>
           <div class="fg">
