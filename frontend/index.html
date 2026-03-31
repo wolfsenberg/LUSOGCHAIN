@@ -449,9 +449,9 @@
 
     function newRid(){ const b=new Uint8Array(32); crypto.getRandomValues(b); return b; }
 
-    // soroban-sdk v21 (Protocol 22): unit enum variants → ScvSymbol directly
+    // soroban-sdk v21: #[contracttype] unit enum → Vec([Symbol(variant)])
     function enumScVal(variant){
-      return StellarSdk.xdr.ScVal.scvSymbol(variant);
+      return StellarSdk.xdr.ScVal.scvVec([StellarSdk.xdr.ScVal.scvSymbol(variant)]);
     }
 
     // ── SOROBAN HELPERS ───────────────────────────────────────────────────────
@@ -495,8 +495,12 @@
         for (let i = 0; i < 30; i++) {
           await new Promise(r => setTimeout(r, 2000));
           const res = await rpc.getTransaction(sent.hash);
-          if (res.status === 'SUCCESS') return res;
-          if (res.status === 'FAILED')  throw new Error('Transaction failed on-chain');
+          if (res.status === 'SUCCESS') {
+            // Wait for RPC state to propagate before callers reload
+            await new Promise(r => setTimeout(r, 2000));
+            return res;
+          }
+          if (res.status === 'FAILED') throw new Error('Transaction failed on-chain');
         }
         throw new Error('Transaction timed out after 60s');
       } finally {
@@ -672,15 +676,27 @@
       const r = S.records[idx];
       if (!r || r.paid || S.loading) return;
 
+      // Ensure idBytes is a proper Uint8Array for scvBytes
+      const idBytes = r.idBytes instanceof Uint8Array
+        ? r.idBytes
+        : (r.idBytes && r.idBytes.buffer
+            ? new Uint8Array(r.idBytes.buffer, r.idBytes.byteOffset, r.idBytes.byteLength)
+            : new Uint8Array(r.idBytes));
+
       const op = sorobanContract.call('pay_bill',
         new StellarSdk.Address(S.wallet).toScVal(),
-        StellarSdk.xdr.ScVal.scvBytes(r.idBytes),
+        StellarSdk.xdr.ScVal.scvBytes(idBytes),
       );
 
       try {
         await invokeOp(op);
+        // Optimistic update immediately so UI feels instant
+        r.paid = true;
+        S.totalPaid += r.amount;
+        render();
         addLog('PAY','pay', r.service+' — '+r.amount.toLocaleString()+' XLM paid');
         toast('Payment confirmed on-chain ✓');
+        // Then sync fresh state from chain
         S.recordsLoading = true; render();
         await Promise.all([loadStats(), loadXlmBalance(), loadRecords()]);
         S.recordsLoading = false;
@@ -693,7 +709,6 @@
 
     function showNewBill(){ S.showNew = true;  render(); }
     function closeModal() { S.showNew = false; render(); }
-    function clearView()  { S.log = []; toast('Log cleared'); render(); }
 
     // ── RENDER ────────────────────────────────────────────────────────────────
     const HEART_SVG = `<svg viewBox="0 0 24 24" fill="none" stroke="#2dd4bf" stroke-width="2" stroke-linecap="round"><path d="M3 12h4l3-9 4 18 3-9h4"/></svg>`;
@@ -748,35 +763,36 @@
     }
 
     function renderDash(){
-      const unpaid    = S.records.filter(r => !r.paid);
-      const paidRecs  = S.records.filter(r =>  r.paid);
-      const unpaidAmt = unpaid.reduce((s,r) => s + r.amount, 0);
-      const dis       = (S.loading || S.recordsLoading) ? 'disabled' : '';
+      const unpaid     = S.records.filter(r => !r.paid);
+      const paidRecs   = S.records.filter(r =>  r.paid);
+      const unpaidAmt  = unpaid.reduce((s,r) => s + r.amount, 0);
+      const dis        = (S.loading || S.recordsLoading) ? 'disabled' : '';
+      const fmtXlm     = n => n.toLocaleString(undefined,{minimumFractionDigits:0,maximumFractionDigits:4});
+      const loading    = S.recordsLoading;
 
       return `
         <div class="stat-row fu d1">
           <div class="stat-card">
             <div class="sc-label">Total Records</div>
-            <div class="sc-val">${S.totalBills}</div>
+            <div class="sc-val">${loading ? '<span class="spin" style="width:16px;height:16px;display:inline-block;vertical-align:middle"></span>' : S.totalBills}</div>
           </div>
           <div class="stat-card accent">
             <div class="sc-label">Total Paid (Chain)</div>
-            <div class="sc-val">${S.totalPaid.toLocaleString()}<span class="sc-unit">XLM</span></div>
+            <div class="sc-val">${loading ? '<span class="spin" style="width:16px;height:16px;display:inline-block;vertical-align:middle"></span>' : fmtXlm(S.totalPaid)+'<span class="sc-unit">XLM</span>'}</div>
           </div>
           <div class="stat-card">
             <div class="sc-label">Paid / Unpaid</div>
-            <div class="sc-val">${paidRecs.length} / ${unpaid.length}</div>
+            <div class="sc-val">${loading ? '<span class="spin" style="width:16px;height:16px;display:inline-block;vertical-align:middle"></span>' : paidRecs.length+' / '+unpaid.length}</div>
           </div>
           <div class="stat-card">
             <div class="sc-label">Outstanding</div>
-            <div class="sc-val">${unpaidAmt.toLocaleString()}<span class="sc-unit">XLM</span></div>
+            <div class="sc-val">${loading ? '<span class="spin" style="width:16px;height:16px;display:inline-block;vertical-align:middle"></span>' : fmtXlm(unpaidAmt)+'<span class="sc-unit">XLM</span>'}</div>
           </div>
         </div>
 
         <div class="actions fu d2">
-          <button class="btn btn-dark"  onclick="showNewBill()" ${dis}>New Billing</button>
-          <button class="btn btn-out"   onclick="refreshAll()"  ${dis}>${S.recordsLoading ? 'Loading…' : 'Refresh'}</button>
-          <button class="btn btn-ghost" onclick="clearView()"   ${dis}>Clear Log</button>
+          <button class="btn btn-dark" onclick="showNewBill()" ${dis}>New Billing</button>
+          <button class="btn btn-out"  onclick="refreshAll()"  ${dis}>${S.recordsLoading ? 'Loading…' : 'Refresh'}</button>
         </div>
 
         <div class="sh fu d3">
@@ -821,20 +837,7 @@
              </div>`
         }
 
-        <div class="sh fu d5" style="margin-top:8px">
-          <div class="sh-t">Transactions</div>
-          <div class="sh-line"></div>
-        </div>
-        <div class="log fu d6">
-          ${S.log.length === 0
-            ? '<div class="log-empty">No transactions yet.</div>'
-            : S.log.map(x => `<div class="log-r">
-                <span class="log-t lt-${x.t}">${x.l}</span>
-                <span class="log-m">${x.m}</span>
-                <span class="log-ts">${x.ts}</span>
-              </div>`).join('')
-          }
-        </div>`;
+        `;
     }
 
     function renderNewModal(){
