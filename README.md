@@ -1,6 +1,8 @@
 # LusogChain
 
 > **Every receipt, permanently verified.**
+> 
+> **Live Demo:** [https://wolfsenberg.github.io/LUSOGCHAIN/frontend/](https://wolfsenberg.github.io/LUSOGCHAIN/frontend/)
 
 ## What is LusogChain?
 **LusogChain** is a decentralized hospital billing system built on the Stellar network. It transforms traditional hospital bills into immutable on-chain records. By bringing medical receipts onto the blockchain, LusogChain ensures that every payment is **auditable, permanent, and tamper-proof**.
