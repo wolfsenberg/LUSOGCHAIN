@@ -6,113 +6,6 @@
 
 ---
 
-## Proof of Work
-
-### ✅ Contract Tests — All Passing
-
-![Cargo Test](assets/cargo_test.png)
-
-3 unit tests passing: `test_happy_path_create_and_pay`, `test_duplicate_billing_rejected`, `test_patient_records_tracked`
-
----
-
-### ✅ Deployment to Stellar Testnet
-
-![Deployment Terminal](assets/deployment_0.png)
-*WASM uploaded, contract deployed, transaction submitted successfully.*
-
-![Stellar Expert — Deploy Transaction](assets/deployment_1.png)
-*Verified on Stellar Expert — `register_hospital` invocation confirmed on-chain.*
-
-**Contract ID (Testnet):**
-```
-CDND234UYOEJJVXWBALEZDS7PIUU6XPF5KJFS5TD4D5RNETVHUUZ2POS
-```
-
-| | |
-|---|---|
-| **Network** | Stellar Testnet |
-| **Explorer** | [View on Stellar Expert](https://stellar.expert/explorer/testnet/contract/CDND234UYOEJJVXWBALEZDS7PIUU6XPF5KJFS5TD4D5RNETVHUUZ2POS) |
-| **Deploy Tx** | [327fe117...](https://stellar.expert/explorer/testnet/tx/327fe1176aebde07c0d3deca166832456c1836197df596807468eb09d9baad57) |
-
----
-
-## App Flow
-
-### 1. Landing Page
-![Landing Page](assets/0.png)
-*The landing page before connecting a wallet. Animated pulse rings, floating receipt cards, and key stats.*
-
----
-
-### 2. Connect Wallet — Freighter Extension
-![Connect with Freighter](assets/1.png)
-*Clicking "Connect Wallet" opens the Freighter extension. The user selects their account and approves the connection.*
-
----
-
-### 3. Dashboard — Connected
-![Dashboard Connected](assets/2.png)
-*After connecting, the dashboard loads with stat cards (Total Records, Total Paid, Paid/Unpaid, Outstanding) and the billing table tabs.*
-
----
-
-### 4. New Billing Record Modal
-![New Billing Modal](assets/3.png)
-*Clicking "+ New Billing" opens the modal. Select a service type, enter an amount in XLM, and optionally add a custom description.*
-
----
-
-### 5. Freighter Signing — Create Billing
-![Freighter Confirm Create](assets/4.png)
-*Freighter pops up to confirm the transaction. Shows the wallet, fee (~0.1 XLM), and transaction details before signing.*
-
----
-
-### 6. Unpaid Bill Appears
-![Unpaid Tab](assets/5.png)
-*After the transaction confirms, the page reloads. The new bill appears under the Unpaid tab with service type, description, amount, and a Pay button.*
-
----
-
-### 7. Paying a Bill — Submitting
-![Submitting Payment](assets/6.png)
-*Clicking "Pay" triggers the payment flow. The "Submitting to Soroban…" overlay appears while the transaction is being processed.*
-
----
-
-### 8. Freighter Signing — Pay Bill
-![Freighter Confirm Pay](assets/7.png)
-*Freighter prompts again to confirm the payment transaction with fee details.*
-
----
-
-### 9. Paid Tab — Bills Confirmed
-![Paid Tab](assets/8.png)
-*After payment confirms, the page reloads. Bills move to the Paid tab. Stats update: Total Paid shows 5,000 XLM, Paid/Unpaid shows 9/0.*
-
----
-
-### 10. On-Chain Receipt
-![Receipt Modal](assets/9.png)
-*Clicking any row opens the on-chain receipt modal. Shows service, description, amount, date, patient address, and full record ID. Includes a "Copy Receipt" button.*
-
----
-
-### 11. Service Filter
-![Service Filter](assets/10.png)
-*The filter dropdown lets you narrow records by service type. Shown here filtered to "Imaging" only.*
-
----
-
-### 12. Disconnect — Back to Landing
-![Disconnect](assets/11.png)
-*Clicking the LusogChain logo disconnects the wallet and returns to the landing page. A "Wallet disconnected" toast confirms the action.*
-
----
-
-## What is LusogChain?
-
 LusogChain is a decentralized hospital billing system built on the **Stellar network** using **Soroban smart contracts**. It transforms traditional hospital bills into immutable on-chain records — giving patients permanent, tamper-proof proof of payment and helping healthcare providers maintain a fully transparent billing history.
 
 No more lost receipts. No more PhilHealth disputes. Every payment lives on-chain.
@@ -127,8 +20,10 @@ No more lost receipts. No more PhilHealth disputes. Every payment lives on-chain
 - [Project Structure](#project-structure)
 - [Setup & Local Development](#setup--local-development)
 - [Usage Guide](#usage-guide)
+- [App Flow](#app-flow)
 - [Smart Contract Reference](#smart-contract-reference)
 - [How Stellar Powers LusogChain](#how-stellar-powers-lusogchain)
+- [Proof of Work](#proof-of-work)
 
 ---
 
@@ -293,7 +188,86 @@ No build step required — the frontend is a single self-contained HTML file.
 
 ---
 
+## App Flow
+
+### 1. Landing Page
+![Landing Page](assets/0.png)
+*The landing page before connecting a wallet. Animated pulse rings, floating receipt cards, and key stats.*
+
+---
+
+### 2. Connect Wallet — Freighter Extension
+![Connect with Freighter](assets/1.png)
+*Clicking "Connect Wallet" opens the Freighter extension. The user selects their account and approves the connection.*
+
+---
+
+### 3. Dashboard — Connected
+![Dashboard Connected](assets/2.png)
+*After connecting, the dashboard loads with stat cards (Total Records, Total Paid, Paid/Unpaid, Outstanding) and the billing table tabs.*
+
+---
+
+### 4. New Billing Record Modal
+![New Billing Modal](assets/3.png)
+*Clicking "+ New Billing" opens the modal. Select a service type, enter an amount in XLM, and optionally add a custom description.*
+
+---
+
+### 5. Freighter Signing — Create Billing
+![Freighter Confirm Create](assets/4.png)
+*Freighter pops up to confirm the transaction. Shows the wallet, fee (~0.1 XLM), and transaction details before signing.*
+
+---
+
+### 6. Unpaid Bill Appears
+![Unpaid Tab](assets/5.png)
+*After the transaction confirms, the page reloads. The new bill appears under the Unpaid tab with service type, description, amount, and a Pay button.*
+
+---
+
+### 7. Paying a Bill — Submitting
+![Submitting Payment](assets/6.png)
+*Clicking "Pay" triggers the payment flow. The "Submitting to Soroban" overlay appears while the transaction is being processed.*
+
+---
+
+### 8. Freighter Signing — Pay Bill
+![Freighter Confirm Pay](assets/7.png)
+*Freighter prompts again to confirm the payment transaction with fee details.*
+
+---
+
+### 9. Paid Tab — Bills Confirmed
+![Paid Tab](assets/8.png)
+*After payment confirms, the page reloads. Bills move to the Paid tab. Stats update: Total Paid shows 5,000 XLM, Paid/Unpaid shows 9/0.*
+
+---
+
+### 10. On-Chain Receipt
+![Receipt Modal](assets/9.png)
+*Clicking any row opens the on-chain receipt modal. Shows service, description, amount, date, patient address, and full record ID. Includes a "Copy Receipt" button.*
+
+---
+
+### 11. Service Filter
+![Service Filter](assets/10.png)
+*The filter dropdown lets you narrow records by service type. Shown here filtered to "Imaging" only.*
+
+---
+
+### 12. Disconnect — Back to Landing
+![Disconnect](assets/11.png)
+*Clicking the LusogChain logo disconnects the wallet and returns to the landing page. A "Wallet disconnected" toast confirms the action.*
+
+---
+
 ## Smart Contract Reference
+
+**Contract ID (Testnet):**
+```
+CDND234UYOEJJVXWBALEZDS7PIUU6XPF5KJFS5TD4D5RNETVHUUZ2POS
+```
 
 ### Functions
 
@@ -349,3 +323,37 @@ stellar contract invoke \
 3. **XLM as Payment** — Native Stellar lumens are used for bill payments, leveraging Stellar's near-zero fees and sub-5-second finality.
 4. **Stellar Testnet** — The app runs on Soroban RPC Testnet and Horizon Testnet, allowing full end-to-end testing with real transactions and no real funds at risk.
 5. **Horizon API** — Used to fetch live XLM wallet balances displayed in the navigation bar.
+
+---
+
+## Proof of Work
+
+### Contract Tests — All Passing
+
+![Cargo Test](assets/cargo_test.png)
+
+```
+test test_duplicate_billing_rejected ... ok
+test test_happy_path_create_and_pay ... ok
+test test_patient_records_tracked ... ok
+
+test result: ok. 3 passed; 0 failed
+```
+
+---
+
+### Deployment to Stellar Testnet
+
+![Deployment Terminal](assets/deployment_0.png)
+*WASM uploaded, contract deployed, transaction submitted successfully to Stellar Testnet.*
+
+![Stellar Expert — Deploy Transaction](assets/deployment_1.png)
+*Verified on Stellar Expert — contract invocation confirmed on-chain.*
+
+| | |
+|---|---|
+| **Network** | Stellar Testnet |
+| **Contract ID** | `CDND234UYOEJJVXWBALEZDS7PIUU6XPF5KJFS5TD4D5RNETVHUUZ2POS` |
+| **Explorer** | [View on Stellar Expert](https://stellar.expert/explorer/testnet/contract/CDND234UYOEJJVXWBALEZDS7PIUU6XPF5KJFS5TD4D5RNETVHUUZ2POS) |
+| **Deploy Tx** | [327fe117...](https://stellar.expert/explorer/testnet/tx/327fe1176aebde07c0d3deca166832456c1836197df596807468eb09d9baad57) |
+| **Frontend** | [https://wolfsenberg.github.io/LUSOGCHAIN/frontend/](https://wolfsenberg.github.io/LUSOGCHAIN/frontend/) |
